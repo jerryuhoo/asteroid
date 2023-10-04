@@ -5,8 +5,10 @@ import matplotlib.pyplot as plt
 
 
 def psycho_acoustic_loss(ys_pred, ys_true, fs=44100, N=1024, nfilts=64, quality=100):
-    # Assuming ys_pred and ys_true have shape: (batch_size, channels, nfft, frame_length)
-
+    """
+    ys_pred: [batch_size, channels, N+1, frame]
+    ys_true: [batch_size, channels, N+1, frame]
+    """
     # Check the number of channels (either 1 for mono or 2 for stereo)
     channels = ys_pred.shape[1]
 
@@ -37,7 +39,7 @@ def psycho_acoustic_loss(ys_pred, ys_true, fs=44100, N=1024, nfilts=64, quality=
         mse_left = compute_channel_loss(ys_pred[:, 0, :, :], ys_true[:, 0, :, :])
         mse_right = compute_channel_loss(ys_pred[:, 1, :, :], ys_true[:, 1, :, :])
         mse_loss = (mse_left + mse_right) / 2  # Average loss across channels
-    print("mse_loss", mse_loss)
+    print("psycho acoustic mse loss", mse_loss.item())
     return mse_loss
 
 
@@ -76,19 +78,6 @@ def compute_masking_threshold(ys, fs, N, nfilts=64, quality=100):
     W_inv = mappingfrombarkmat(W, 2 * N)
     mT = mappingfrombark(mTbarkdequant, W_inv, 2 * N)
 
-    # for m in range(M):  # M: number of blocks (frame number)
-    #     mXbark = mapping2bark(torch.abs(ys[:, m]), W, 2 * N)
-    #     mTbark = maskingThresholdBark(
-    #         mXbark, spreadingfuncmatrix, alpha, fs, nfilts
-    #     ) / (quality / 100)
-    #     mTbarkquant[:, m] = torch.round(torch.log2(mTbark) * 4)
-    #     mTbarkquant[:, m].clamp_(min=0)
-    #     mTbarkdequant = torch.pow(2, mTbarkquant[:, m] / 4).to(mXbark.device)
-    #     mT[:, m] = mappingfrombark(mTbarkdequant, mappingfrombarkmat(W, 2 * N), 2 * N)
-    #     # print("mTbark", mTbark)
-    #     # print("mTbarkquant", mTbarkquant)
-    #     # print("mTbarkdequant", mTbarkdequant)
-    #     # print("mT", mT)
     return mT, mTbarkquant
 
 
@@ -180,18 +169,6 @@ def mapping2barkmat(fs, nfilts, nfft):
     for i in range(nfilts):
         W[i, 0 : int(nfft / 2) + 1] = (torch.round(binbark / step_bark) == i).float()
     return W
-
-
-# def mapping2bark(mX, W, nfft):
-#     print("mX", mX.shape)
-#     print("W", W.shape)
-#     nfreqs = int(nfft / 2)
-#     mX = mX[:-1].unsqueeze(0)
-#     print("mX2", mX.shape)
-#     print("mX[:nfreqs].abs()", mX[:nfreqs].abs().shape)
-#     print("W[:, :nfreqs]", W[:, :nfreqs].shape)
-#     mXbark = (torch.mm((mX[:nfreqs].abs()) ** 2.0, W[:, :nfreqs].T)) ** 0.5
-#     return mXbark
 
 
 def mapping2bark(mX, W, nfft):
