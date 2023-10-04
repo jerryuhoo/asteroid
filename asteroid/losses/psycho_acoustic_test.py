@@ -19,21 +19,27 @@ ys_noisy = compute_STFT(y_noisy, N=1024).unsqueeze(0).unsqueeze(0)
 ys_true = compute_STFT(y_true, N=1024).unsqueeze(0).unsqueeze(0)
 ys_random1 = compute_STFT(y_random1, N=1024).unsqueeze(0).unsqueeze(0)
 ys_random2 = compute_STFT(y_random2, N=1024).unsqueeze(0).unsqueeze(0)
+# shape: [batch size, channels, N+1, frame]
 
-print("ys_noisy", ys_noisy.shape)
+# Concatenating all ys_pred inputs along a new batch dimension
+ys_pred = torch.cat(
+    [ys_noisy, ys_true, ys_random1, ys_random2], dim=0
+)  # Shape: [4, ...other dims...]
+ys_pred = ys_noisy
+print(ys_pred.shape)
 
-loss_noisy = psycho_acoustic_loss(ys_noisy, ys_true, fs=sample_rate)
-print(f"Psychoacoustic Loss (with noise): {loss_noisy.item()}")
+# Replicating ys_true to have the same batch size as ys_pred
+ys_true_batch = ys_true.repeat(1, 1, 1, 1)  # Shape: [4, ...other dims...]
+print(ys_true_batch.shape)
+# Compute loss for all batch entries at once
+loss = psycho_acoustic_loss(ys_pred, ys_true_batch, fs=sample_rate)
 
-
-loss_self = psycho_acoustic_loss(ys_true, ys_true, fs=sample_rate)
-loss_random1 = psycho_acoustic_loss(ys_random1, ys_true, fs=sample_rate)
-loss_random2 = psycho_acoustic_loss(ys_random2, ys_true, fs=sample_rate)
-
-print(f"Psychoacoustic Loss (self): {loss_self.item()}")
-print(f"Psychoacoustic Loss (random noise 1): {loss_random1.item()}")
-print(f"Psychoacoustic Loss (random noise 2): {loss_random2.item()}")
-
+# Printing individual loss values
+# print(f"Psychoacoustic Loss (with noise): {loss[0].item()}")
+# print(f"Psychoacoustic Loss (self): {loss[1].item()}")
+# print(f"Psychoacoustic Loss (random noise 1): {loss[2].item()}")
+# print(f"Psychoacoustic Loss (random noise 2): {loss[3].item()}")
+print(f"Psychoacoustic Loss: {loss.item()}")
 # y_true = y_true.unsqueeze(0)
 
 # N = 1024

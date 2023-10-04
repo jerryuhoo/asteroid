@@ -4,11 +4,8 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 
 
-# from MDCTfb import *
-
-
 def psycho_acoustic_loss(ys_pred, ys_true, fs=44100, N=1024, nfilts=64, quality=100):
-    # Assuming y_pred and y_true have shape: (batch_size, channels, nfft, frame_length)
+    # Assuming ys_pred and ys_true have shape: (batch_size, channels, nfft, frame_length)
 
     # Check the number of channels (either 1 for mono or 2 for stereo)
     channels = ys_pred.shape[1]
@@ -19,16 +16,18 @@ def psycho_acoustic_loss(ys_pred, ys_true, fs=44100, N=1024, nfilts=64, quality=
         )
 
     # Function to compute MSE loss for a single channel
-    def compute_channel_loss(y_pred_channel, y_true_channel):
+    def compute_channel_loss(y_pred_channel, y_true_channel, use_quantization=True):
         mT_pred, mTbarkquant_pred = compute_masking_threshold(
             y_pred_channel, fs, N, nfilts, quality
         )
         mT_true, mTbarkquant_true = compute_masking_threshold(
             y_true_channel, fs, N, nfilts, quality
         )
-        # print("mT_pred", mT_pred.shape)
-        # print("mT_true", mT_true.shape)
-        return F.mse_loss(mTbarkquant_pred, mTbarkquant_true)
+
+        if use_quantization:
+            return F.mse_loss(mTbarkquant_pred, mTbarkquant_true)
+        else:
+            return F.mse_loss(mT_pred, mT_true)
 
     if channels == 1:
         # Mono audio
@@ -38,7 +37,7 @@ def psycho_acoustic_loss(ys_pred, ys_true, fs=44100, N=1024, nfilts=64, quality=
         mse_left = compute_channel_loss(ys_pred[:, 0, :, :], ys_true[:, 0, :, :])
         mse_right = compute_channel_loss(ys_pred[:, 1, :, :], ys_true[:, 1, :, :])
         mse_loss = (mse_left + mse_right) / 2  # Average loss across channels
-
+    print("mse_loss", mse_loss)
     return mse_loss
 
 
@@ -54,108 +53,42 @@ def get_analysis_params(fs, N, nfilts=64):
     return W, spreadingfuncmatrix, alpha
 
 
-"""
-def compute_masking_threshold(x, fs, N, nfilts=64, quality=100):
-    W, spreadingfuncmatrix, alpha = get_analysis_params(fs, N, nfilts)
-    ys = compute_STFT(x, N)
-    W = W.to(ys.device)
-
-    M = ys.shape[1]  # number of blocks in the signal
-    mT = torch.zeros((N + 1, M))
-
-    for m in range(M):  # M: number of blocks
-        mXbark = mapping2bark(torch.abs(ys[:, m]), W, 2 * N)
-        print("mXbark", mXbark)
-        mTbark = maskingThresholdBark(
-            mXbark, spreadingfuncmatrix, alpha, fs, nfilts
-        ) / (quality / 100)
-        print("mTbark", mTbark)
-
-        # Skip the quantization steps
-        # Directly map mTbark to mT
-        mTbark = mTbark.squeeze(0)
-        mT[:, m] = mappingfrombark(mTbark, mappingfrombarkmat(W, 2 * N), 2 * N)
-
-    return mT, 0
-"""
-
-
-# def compute_masking_threshold(ys, fs, N, nfilts=64, quality=100):
-#     W, spreadingfuncmatrix, alpha = get_analysis_params(fs, N, nfilts)
-
-#     W = W.to(ys.device)
-
-#     M = ys.shape[1]  # number of blocks in the signal
-#     mT = torch.zeros((N + 1, M))
-#     mTbarkquant = torch.zeros((nfilts, M))
-
-#     for m in range(M):  # M: number of blocks
-#         mXbark = mapping2bark(torch.abs(ys[:, m]), W, 2 * N)
-#         mTbark = maskingThresholdBark(
-#             mXbark, spreadingfuncmatrix, alpha, fs, nfilts
-#         ) / (quality / 100)
-#         mTbarkquant[:, m] = torch.round(torch.log2(mTbark) * 4)
-#         mTbarkquant[:, m].clamp_(min=0)
-#         mTbarkdequant = torch.pow(2, mTbarkquant[:, m] / 4).to(mXbark.device)
-#         mT[:, m] = mappingfrombark(mTbarkdequant, mappingfrombarkmat(W, 2 * N), 2 * N)
-
-#     return mT, mTbarkquant
-
-
-# def compute_masking_threshold(ys, fs, N, nfilts=64, quality=100):
-#     W, spreadingfuncmatrix, alpha = get_analysis_params(fs, N, nfilts)
-#     W = W.to(ys.device)
-#     ys = ys.squeeze()
-#     M = ys.shape[1]  # number of blocks in the signal
-#     mT = torch.zeros((N + 1, M))
-#     mTbarkquant = torch.zeros((nfilts, M))
-
-#     for m in range(M):  # M: number of blocks (frame number)
-#         mXbark = mapping2bark(torch.abs(ys[:, m]), W, 2 * N)
-#         mTbark = maskingThresholdBark(
-#             mXbark, spreadingfuncmatrix, alpha, fs, nfilts
-#         ) / (quality / 100)
-#         mTbarkquant[:, m] = torch.round(torch.log2(mTbark) * 4)
-#         mTbarkquant[:, m].clamp_(min=0)
-#         mTbarkdequant = torch.pow(2, mTbarkquant[:, m] / 4).to(mXbark.device)
-#         mT[:, m] = mappingfrombark(mTbarkdequant, mappingfrombarkmat(W, 2 * N), 2 * N)
-#         print("mTbark", mTbark)
-#         print("mTbarkquant", mTbarkquant)
-#         print("mTbarkdequant", mTbarkdequant)
-#         print("mT", mT)
-#     return mT, mTbarkquant
-
-
 def compute_masking_threshold(ys, fs, N, nfilts=64, quality=100):
     W, spreadingfuncmatrix, alpha = get_analysis_params(fs, N, nfilts)
     W = W.to(ys.device)
-    ys = ys.squeeze()
+    ys = ys.squeeze(1)
     M = ys.shape[1]  # number of blocks in the signal
-    mT = torch.zeros((N + 1, M))
+
+    # Compute mXbark for all frames at once
+    mXbark = mapping2bark(torch.abs(ys), W, 2 * N)
+
+    # Compute mTbark for all frames at once
+    mTbark = maskingThresholdBark(mXbark, spreadingfuncmatrix, alpha, fs, nfilts) / (
+        quality / 100
+    )
+
+    # Vectorized operations to avoid loop
+    mTbarkquant = torch.round(torch.log2(mTbark) * 4)
+    mTbarkquant = torch.clamp(mTbarkquant, min=0)
+    mTbarkdequant = torch.pow(2, mTbarkquant / 4).to(mXbark.device)
+
+    # Compute mT for all frames at once
+    W_inv = mappingfrombarkmat(W, 2 * N)
+    mT = mappingfrombark(mTbarkdequant, W_inv, 2 * N)
 
     # for m in range(M):  # M: number of blocks (frame number)
     #     mXbark = mapping2bark(torch.abs(ys[:, m]), W, 2 * N)
     #     mTbark = maskingThresholdBark(
     #         mXbark, spreadingfuncmatrix, alpha, fs, nfilts
     #     ) / (quality / 100)
-    # print("mTbark", mTbark)
-    # return mTbark, 0
-
-    mTbarkquant = torch.zeros((nfilts, M))
-
-    for m in range(M):  # M: number of blocks (frame number)
-        mXbark = mapping2bark(torch.abs(ys[:, m]), W, 2 * N)
-        mTbark = maskingThresholdBark(
-            mXbark, spreadingfuncmatrix, alpha, fs, nfilts
-        ) / (quality / 100)
-        mTbarkquant[:, m] = torch.round(torch.log2(mTbark) * 4)
-        mTbarkquant[:, m].clamp_(min=0)
-        mTbarkdequant = torch.pow(2, mTbarkquant[:, m] / 4).to(mXbark.device)
-        mT[:, m] = mappingfrombark(mTbarkdequant, mappingfrombarkmat(W, 2 * N), 2 * N)
-        # print("mTbark", mTbark)
-        # print("mTbarkquant", mTbarkquant)
-        # print("mTbarkdequant", mTbarkdequant)
-        # print("mT", mT)
+    #     mTbarkquant[:, m] = torch.round(torch.log2(mTbark) * 4)
+    #     mTbarkquant[:, m].clamp_(min=0)
+    #     mTbarkdequant = torch.pow(2, mTbarkquant[:, m] / 4).to(mXbark.device)
+    #     mT[:, m] = mappingfrombark(mTbarkdequant, mappingfrombarkmat(W, 2 * N), 2 * N)
+    #     # print("mTbark", mTbark)
+    #     # print("mTbarkquant", mTbarkquant)
+    #     # print("mTbarkdequant", mTbarkdequant)
+    #     # print("mT", mT)
     return mT, mTbarkquant
 
 
@@ -201,7 +134,7 @@ def spreadingfunctionmat(spreadingfunctionBarkdB, alpha, nfilts):
 
 def maskingThresholdBark(mXbark, spreadingfuncmatrix, alpha, fs, nfilts):
     spreadingfuncmatrix = spreadingfuncmatrix.to(mXbark.device)
-    mTbark = torch.mm(mXbark**alpha, spreadingfuncmatrix**alpha)
+    mTbark = torch.matmul(mXbark**alpha, spreadingfuncmatrix**alpha)
     mTbark = mTbark ** (1.0 / alpha)
 
     maxfreq = fs / 2.0
@@ -249,36 +182,35 @@ def mapping2barkmat(fs, nfilts, nfft):
     return W
 
 
-def mapping2bark(mX, W, nfft):
-    nfreqs = int(nfft / 2)
-    mX = mX[:-1].unsqueeze(0)
-    mXbark = (torch.mm((mX[:nfreqs].abs()) ** 2.0, W[:, :nfreqs].T)) ** 0.5
-    return mXbark
-
-
 # def mapping2bark(mX, W, nfft):
-#     # Assuming mX has shape (batch_size, nfreqs)
-#     # and W has shape (nfilts, nfreqs)
-
-#     # Expand dimensions of mX to have shape (batch_size, 1, nfreqs)
-#     mX_expanded = mX.unsqueeze(1)
-
-#     # Transpose W to have shape (nfreqs, nfilts),
-#     # then expand dimensions to have shape (1, nfilts, nfreqs)
-#     W_expanded = W.t().unsqueeze(0)
-
-#     # Now, we can perform batch matrix multiplication
-#     # The resulting shape will be (batch_size, nfilts, 1)
-#     mXbark = torch.bmm(
-#         W_expanded.expand(mX_expanded.size(0), -1, -1), mX_expanded.transpose(1, 2)
-#     )
-
-#     # Take square, then square root, and squeeze the last dimension
-#     # to get final shape of (batch_size, nfilts)
-#     mXbark = (mXbark**2.0) ** 0.5
-#     mXbark = mXbark.squeeze(-1)
-
+#     print("mX", mX.shape)
+#     print("W", W.shape)
+#     nfreqs = int(nfft / 2)
+#     mX = mX[:-1].unsqueeze(0)
+#     print("mX2", mX.shape)
+#     print("mX[:nfreqs].abs()", mX[:nfreqs].abs().shape)
+#     print("W[:, :nfreqs]", W[:, :nfreqs].shape)
+#     mXbark = (torch.mm((mX[:nfreqs].abs()) ** 2.0, W[:, :nfreqs].T)) ** 0.5
 #     return mXbark
+
+
+def mapping2bark(mX, W, nfft):
+    """
+    mX [batch_size, N+1, frame]
+    W [M, 2*N] M=64
+    """
+
+    nfreqs = int(nfft / 2)
+
+    # Removing the last frequency band and squaring the magnitude
+    mX = mX[:, :-1, :] ** 2
+    mX_transposed = mX.transpose(-1, -2)  # Shape should now be [batch size, n, 1024]
+
+    # Performing the matrix multiplication and square root operation
+    mXbark = (
+        torch.matmul(mX_transposed, W[:, :nfreqs].T) ** 0.5
+    )  # Shape should be [batch size, n, 64]
+    return mXbark
 
 
 def mappingfrombarkmat(W, nfft):
@@ -290,28 +222,15 @@ def mappingfrombarkmat(W, nfft):
 
 
 def mappingfrombark(mTbark, W_inv, nfft):
-    mTbark = mTbark.unsqueeze(0)
+    """
+    mTbark [batch_size, N, M]
+    W_inv [N, M]
+    """
+
     nfreqs = int(nfft / 2)
-    mT = torch.mm(mTbark, W_inv[:, :nfreqs].T)
-    return mT
+    mT = torch.matmul(mTbark, W_inv[:, :nfreqs].T)
 
-
-# def mappingfrombarkmat(W, nfft):
-#     nfreqs = int(nfft / 2)
-#     W_inv = torch.bmm(
-#         torch.diag_embed(1.0 / (torch.sum(W, dim=1) + 1e-6)).sqrt(),
-#         W[:, 0 : nfreqs + 1]
-#         .unsqueeze(0)
-#         .expand(W.size(0), *W[:, 0 : nfreqs + 1].shape),
-#     ).permute(0, 2, 1)
-#     return W_inv
-
-
-# def mappingfrombark(mTbark, W_inv, nfft):
-#     # Assuming mTbark has shape (batch_size, nfilts, M)
-#     nfreqs = int(nfft / 2)
-#     mT = torch.bmm(mTbark, W_inv[:, :nfreqs].permute(0, 2, 1))
-#     return mT
+    return mT  # Keeping shape [batch size, N, N]
 
 
 def plot_results(ys, fs, N, nfilts=64, quality=100):
