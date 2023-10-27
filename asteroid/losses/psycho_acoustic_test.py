@@ -26,11 +26,11 @@ ys_pred = torch.cat(
     [ys_noisy, ys_true, ys_random1, ys_random2], dim=0
 )  # Shape: [4, ...other dims...]
 ys_pred = ys_noisy
-print(ys_pred.shape)
+# print(ys_pred.shape)
 
 # Replicating ys_true to have the same batch size as ys_pred
 ys_true_batch = ys_true.repeat(1, 1, 1, 1)  # Shape: [4, ...other dims...]
-print(ys_true_batch.shape)
+# print(ys_true_batch.shape)
 # Compute loss for all batch entries at once
 loss = psycho_acoustic_loss(ys_pred, ys_true_batch, fs=sample_rate)
 
@@ -42,6 +42,8 @@ loss = psycho_acoustic_loss(ys_pred, ys_true_batch, fs=sample_rate)
 print(f"Psychoacoustic Loss: {loss.item()}")
 # y_true = y_true.unsqueeze(0)
 
-# N = 1024
-# ys_true = compute_STFT(y_true, N)
-# plot_results(ys_true, sample_rate, N)
+N = 1024
+ys_true = compute_STFT(y_true, N)
+ys_true = ys_true.unsqueeze(0).unsqueeze(0)
+print(ys_true.shape)
+plot_results(ys_true, sample_rate, N)

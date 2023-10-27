@@ -99,8 +99,8 @@ class System(pl.LightningModule):
         """
         inputs, targets = batch
         est_targets = self(inputs)
-        loss = self.loss_func(est_targets, targets)
-        return loss
+        loss_dict = self.loss_func(est_targets, targets)
+        return loss_dict
 
     def training_step(self, batch, batch_nb):
         """Pass data through the model and compute the loss.
@@ -115,9 +115,14 @@ class System(pl.LightningModule):
         Returns:
             torch.Tensor, the value of the loss.
         """
-        loss = self.common_step(batch, batch_nb, train=True)
-        self.log("loss", loss, logger=True)
-        return loss
+        loss_dict = self.common_step(batch, batch_nb, train=True)
+        total_loss = loss_dict["total_loss"]
+        self.log("train_total_loss", total_loss, logger=True)
+        # Logging the individual losses
+        for loss_name, loss_value in loss_dict.items():
+            if loss_name != "total_loss":  # Skip logging the total loss again
+                self.log(f"train_{loss_name}", loss_value, logger=True)
+        return total_loss  # Return total loss for backpropagation
 
     def validation_step(self, batch, batch_nb):
         """Need to overwrite PL validation_step to do validation.
@@ -127,14 +132,21 @@ class System(pl.LightningModule):
                 in most cases) but can be something else.
             batch_nb (int): The number of the batch in the epoch.
         """
-        loss = self.common_step(batch, batch_nb, train=False)
-        self.log("val_loss", loss, on_epoch=True, prog_bar=True)
+        loss_dict = self.common_step(batch, batch_nb, train=False)
+        total_loss = loss_dict["total_loss"]
+        self.log("val_total_loss", total_loss, on_epoch=True, prog_bar=True)
+        # Logging the individual losses
+        for loss_name, loss_value in loss_dict.items():
+            if loss_name != "total_loss":  # Skip logging the total loss again
+                self.log(f"val_{loss_name}", loss_value, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self):
         """Log hp_metric to tensorboard for hparams selection."""
         hp_metric = self.trainer.callback_metrics.get("val_loss", None)
         if hp_metric is not None:
-            self.trainer.logger.log_metrics({"hp_metric": hp_metric}, step=self.trainer.global_step)
+            self.trainer.logger.log_metrics(
+                {"hp_metric": hp_metric}, step=self.trainer.global_step
+            )
 
     def configure_optimizers(self):
         """Initialize optimizers, batch-wise and epoch-wise schedulers."""

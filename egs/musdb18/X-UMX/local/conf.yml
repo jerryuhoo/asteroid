@@ -2,7 +2,7 @@
 training:
   epochs: 1000
   batch_size: 14
-  loss_combine_sources: yes
+  loss_combine_sources: no
   loss_use_multidomain: yes
   mix_coef: 10.0
   val_dur: 80.0

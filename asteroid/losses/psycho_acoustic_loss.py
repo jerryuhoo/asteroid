@@ -18,7 +18,7 @@ def psycho_acoustic_loss(ys_pred, ys_true, fs=44100, N=1024, nfilts=64, quality=
         )
 
     # Function to compute MSE loss for a single channel
-    def compute_channel_loss(y_pred_channel, y_true_channel, use_quantization=True):
+    def compute_channel_loss(y_pred_channel, y_true_channel, use_quantization=False):
         mT_pred, mTbarkquant_pred = compute_masking_threshold(
             y_pred_channel, fs, N, nfilts, quality
         )
@@ -39,7 +39,7 @@ def psycho_acoustic_loss(ys_pred, ys_true, fs=44100, N=1024, nfilts=64, quality=
         mse_left = compute_channel_loss(ys_pred[:, 0, :, :], ys_true[:, 0, :, :])
         mse_right = compute_channel_loss(ys_pred[:, 1, :, :], ys_true[:, 1, :, :])
         mse_loss = (mse_left + mse_right) / 2  # Average loss across channels
-    print("psycho acoustic mse loss", mse_loss.item())
+    # print("psycho acoustic mse loss", mse_loss.item())
     return mse_loss
 
 
@@ -70,7 +70,12 @@ def compute_masking_threshold(ys, fs, N, nfilts=64, quality=100):
     )
 
     # Vectorized operations to avoid loop
-    mTbarkquant = torch.round(torch.log2(mTbark) * 4)
+    mTbarkquant = torch.round(torch.log2(mTbark + 1e-6) * 4)
+
+    if torch.isnan(mTbarkquant).any():
+        print("NaN detected in mTbarkquant!")
+        raise ValueError
+
     mTbarkquant = torch.clamp(mTbarkquant, min=0)
     mTbarkdequant = torch.pow(2, mTbarkquant / 4).to(mXbark.device)
 
@@ -161,14 +166,18 @@ def bark2hz(Brk):
 
 def mapping2barkmat(fs, nfilts, nfft):
     maxbark = hz2bark(fs / 2)
-    nfreqs = nfft // 2
     step_bark = maxbark / (nfilts - 1)
     binbark = hz2bark(torch.linspace(0, (nfft / 2), int(nfft / 2) + 1) * fs / nfft)
 
-    W = torch.zeros(nfilts, nfft)
-    for i in range(nfilts):
-        W[i, 0 : int(nfft / 2) + 1] = (torch.round(binbark / step_bark) == i).float()
-    return W
+    filter_indices = torch.round(binbark / step_bark).unsqueeze(0)
+    target_indices = torch.arange(nfilts).unsqueeze(1)
+
+    W = (filter_indices == target_indices).float()
+
+    W_padded = torch.zeros(nfilts, nfft)
+    W_padded[:, 0 : int(nfft / 2) + 1] = W
+
+    return W_padded
 
 
 def mapping2bark(mX, W, nfft):
@@ -183,10 +192,15 @@ def mapping2bark(mX, W, nfft):
     mX = mX[:, :-1, :] ** 2
     mX_transposed = mX.transpose(-1, -2)  # Shape should now be [batch size, n, 1024]
 
-    # Performing the matrix multiplication and square root operation
-    mXbark = (
-        torch.matmul(mX_transposed, W[:, :nfreqs].T) ** 0.5
-    )  # Shape should be [batch size, n, 64]
+    # Performing the matrix multiplication
+    mXbark_pre_sqrt = torch.matmul(mX_transposed, W[:, :nfreqs].T)
+
+    # Clamping to ensure non-negative values before sqrt
+    mXbark_pre_sqrt = torch.clamp(mXbark_pre_sqrt, min=0.0000001)
+
+    # Now, take the square root
+    mXbark = mXbark_pre_sqrt**0.5
+
     return mXbark
 
 
@@ -214,16 +228,22 @@ def plot_results(ys, fs, N, nfilts=64, quality=100):
     mT, mTbarkquant = compute_masking_threshold(ys, fs, N, nfilts, quality)
 
     # Convert STFT magnitude to dB for visualization
+    ys = ys.squeeze()
+    mT = mT.squeeze()
+
     ys_dB = 20 * torch.log10(torch.abs(ys) + 1e-6)
     # Convert masking threshold to dB for visualization
-    mT_dB = 20 * torch.log10(mTbarkquant + 1e-6)
+    mT_dB = 20 * torch.log10(mT + 1e-6).transpose(0, 1)
 
-    print("mt_dB", mT_dB)
-    print("ys_dB", ys_dB)
+    # print("mT", mT_dB)
+    # print("mTbarkquant", mTbarkquant)
+
+    # print("mt_dB", mT_dB.shape)
+    # print("ys_dB", ys_dB.shape)
 
     # Frequency and Time vectors for plotting
     f = np.linspace(0, fs / 2, ys.shape[0])
-    t = np.linspace(0, ys.shape[0], ys.shape[1])
+    t = np.linspace(0, 4, ys.shape[1])
 
     # Plotting
     plt.figure(figsize=(12, 8))
@@ -238,8 +258,8 @@ def plot_results(ys, fs, N, nfilts=64, quality=100):
     # Plot Spectrum and Masking Threshold of Middle Frame
     middle_frame_idx = len(t) // 2
     plt.subplot(3, 1, 2)
-    print("ys", ys_dB[:, middle_frame_idx].numpy())
-    print("mt", mT_dB[:, middle_frame_idx].numpy())
+    # print("ys", ys_dB[:, middle_frame_idx].numpy())
+    # print("mt", mT_dB[:, middle_frame_idx].numpy())
     plt.plot(
         f, ys_dB[:, middle_frame_idx].numpy(), color="blue", label="Spectrum", alpha=0.7
     )
@@ -248,6 +268,18 @@ def plot_results(ys, fs, N, nfilts=64, quality=100):
         mT_dB[:, middle_frame_idx].numpy(),
         color="red",
         label="Masking Threshold",
+        alpha=0.7,
+    )
+    mTbarkquant = mTbarkquant.squeeze()
+    W, _, alpha = get_analysis_params(fs, N, nfilts)
+    W_inv = mappingfrombarkmat(W, 2 * N)
+    mTbarkquant = mappingfrombark(mTbarkquant, W_inv, 2 * N).transpose(0, 1)
+    # print("mTbarkquant", mTbarkquant.shape)
+    plt.plot(
+        f,
+        mTbarkquant[:, middle_frame_idx].numpy(),
+        color="green",
+        label="Masking Threshold (quantized)",
         alpha=0.7,
     )
     plt.legend()

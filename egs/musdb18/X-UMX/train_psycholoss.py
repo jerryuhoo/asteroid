@@ -363,6 +363,7 @@ class MultiDomainLoss(_Loss):
                 quality=100,
                 combination=self._combi,
             )
+            # print("loss_pa: {}".format(loss_pa))
             total_loss = float(self.coef) * loss_t + loss_f + loss_pa
 
             loss_dict["total_loss"] = total_loss
@@ -370,10 +371,21 @@ class MultiDomainLoss(_Loss):
             loss_dict["time_domain_loss"] = loss_t
             loss_dict["psycho_acoustic_loss"] = loss_pa
         else:
-            loss_f = freq_domain_loss(spec_hat, Y, combination=self._combi)
-            # Fill the loss dictionary for non-multidomain case
-            loss_dict["total_loss"] = loss_f
-            loss_dict["freq_domain_loss"] = loss_f
+            # loss_f = freq_domain_loss(spec_hat, Y, combination=self._combi)
+            # # Fill the loss dictionary for non-multidomain case
+            # loss_dict["total_loss"] = loss_f
+            # loss_dict["freq_domain_loss"] = loss_f
+            loss_pa = psycho_acoustic_loss_comb(
+                spec_hat,
+                Y,
+                fs=44100,
+                N=2048,
+                nfilts=64,
+                quality=100,
+                combination=self._combi,
+            )
+            loss_dict["total_loss"] = loss_pa
+            loss_dict["psycho_acoustic_loss"] = loss_pa
         return loss_dict
 
 
@@ -442,6 +454,10 @@ class XUMXManager(System):
             ]
             loss_dict = self.common_step(batch_tmp, batch_nb, train=False)
             loss_tmp += loss_dict["total_loss"].item()
+            loss_freq_tmp = loss_dict["freq_domain_loss"].item()
+            loss_time_tmp = loss_dict["time_domain_loss"].item()
+            loss_pa_tmp = loss_dict["psycho_acoustic_loss"].item()
+
             cnt += 1
             sp += dur_samples
             if (
@@ -450,7 +466,13 @@ class XUMXManager(System):
             ):
                 break
         loss = loss_tmp / cnt
+        loss_freq = loss_freq_tmp / cnt
+        loss_time = loss_time_tmp / cnt
+        loss_pa = loss_pa_tmp / cnt
         self.log("val_loss", loss, on_epoch=True, prog_bar=True)
+        self.log("val_freq_domain_loss", loss_freq, on_epoch=True, prog_bar=True)
+        self.log("val_time_domain_loss", loss_time, on_epoch=True, prog_bar=True)
+        self.log("val_psycho_acoustic_loss", loss_pa, on_epoch=True, prog_bar=True)
 
 
 def main(conf, args):
