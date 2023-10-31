@@ -86,8 +86,12 @@ def compute_masking_threshold(ys, fs, N, nfilts=64, quality=100):
     return mT, mTbarkquant
 
 
-def compute_STFT(x, N):
+def compute_STFT(x, N, return_amplitude=True):
     ys = torch.stft(x, n_fft=2 * N, return_complex=True)
+
+    if return_amplitude:
+        ys = torch.abs(ys)
+
     ys = ys * torch.sqrt(torch.tensor(2 * N / 2)) / 2 / 0.375
     return ys
 
@@ -301,8 +305,8 @@ def plot_results(ys, fs, N, nfilts=64, quality=100):
     plt.subplot(3, 1, 3)
     plt.plot(spreadingfunctionBarkVoltage.numpy())
     x_length = len(spreadingfunctionBarkVoltage)
-    plt.axvline(x=x_length // 2, color="red", linestyle="--")
-    plt.axvline(x=x_length - 1, color="red", linestyle="--")
+    # plt.axvline(x=x_length // 2, color="red", linestyle="--")
+    # plt.axvline(x=x_length - 1, color="red", linestyle="--")
     plt.title("Spreading Function")
     plt.xlabel("Bark Scale")
     plt.ylabel("Amplitude (Voltage)")
