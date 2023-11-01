@@ -83,7 +83,7 @@ def compute_masking_threshold(ys, fs, N, nfilts=64, quality=100):
     W_inv = mappingfrombarkmat(W, 2 * N)
     mT = mappingfrombark(mTbarkdequant, W_inv, 2 * N)
 
-    return mT, mTbarkquant
+    return mTbark, mTbarkquant
 
 
 def compute_STFT(x, N, return_amplitude=True):
@@ -130,7 +130,7 @@ def spreadingfunctionmat(spreadingfunctionBarkdB, alpha, nfilts):
     return spreadingfuncmatrix
 
 
-def maskingThresholdBark(mXbark, spreadingfuncmatrix, alpha, fs, nfilts):
+def maskingThresholdBark(mXbark, spreadingfuncmatrix, alpha, fs, nfilts, use_LTQ=False):
     spreadingfuncmatrix = spreadingfuncmatrix.to(mXbark.device)
     mTbark = torch.matmul(mXbark**alpha, spreadingfuncmatrix**alpha)
     mTbark = mTbark ** (1.0 / alpha)
@@ -141,16 +141,17 @@ def maskingThresholdBark(mXbark, spreadingfuncmatrix, alpha, fs, nfilts):
     barks = torch.arange(0, nfilts) * step_bark
     f = bark2hz(barks) + 1e-6
 
-    LTQ = torch.clip(
-        (
-            3.64 * (f / 1000.0) ** -0.8
-            - 6.5 * torch.exp(-0.6 * (f / 1000.0 - 3.3) ** 2.0)
-            + 1e-3 * ((f / 1000.0) ** 4.0)
-        ),
-        -20,
-        120,
-    ).to(mXbark.device)
-    mTbark = torch.max(mTbark, 10.0 ** ((LTQ - 60) / 20))
+    if use_LTQ:
+        LTQ = torch.clip(
+            (
+                3.64 * (f / 1000.0) ** -0.8
+                - 6.5 * torch.exp(-0.6 * (f / 1000.0 - 3.3) ** 2.0)
+                + 1e-3 * ((f / 1000.0) ** 4.0)
+            ),
+            -20,
+            120,
+        ).to(mXbark.device)
+        mTbark = torch.max(mTbark, 10.0 ** ((LTQ - 60) / 20))
     return mTbark
 
 

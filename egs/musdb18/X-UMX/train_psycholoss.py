@@ -7,6 +7,7 @@ import tqdm
 import itertools
 import numpy as np
 import sklearn.preprocessing
+import re
 
 import torch
 import pytorch_lightning as pl
@@ -446,6 +447,9 @@ class XUMXManager(System):
         dur_samples = int(self.val_dur_samples)
         cnt = 0
         loss_tmp = 0.0
+        loss_freq_tmp = 0.0
+        loss_time_tmp = 0.0
+        loss_pa_tmp = 0.0
 
         while 1:
             batch_tmp = [
@@ -454,9 +458,12 @@ class XUMXManager(System):
             ]
             loss_dict = self.common_step(batch_tmp, batch_nb, train=False)
             loss_tmp += loss_dict["total_loss"].item()
-            loss_freq_tmp = loss_dict["freq_domain_loss"].item()
-            loss_time_tmp = loss_dict["time_domain_loss"].item()
-            loss_pa_tmp = loss_dict["psycho_acoustic_loss"].item()
+            if loss_dict.get("freq_domain_loss") is not None:
+                loss_freq_tmp += loss_dict["freq_domain_loss"].item()
+            if loss_dict.get("time_domain_loss") is not None:
+                loss_time_tmp += loss_dict["time_domain_loss"].item()
+            if loss_dict.get("psycho_acoustic_loss") is not None:
+                loss_pa_tmp += loss_dict["psycho_acoustic_loss"].item()
 
             cnt += 1
             sp += dur_samples
@@ -466,13 +473,16 @@ class XUMXManager(System):
             ):
                 break
         loss = loss_tmp / cnt
-        loss_freq = loss_freq_tmp / cnt
-        loss_time = loss_time_tmp / cnt
-        loss_pa = loss_pa_tmp / cnt
         self.log("val_loss", loss, on_epoch=True, prog_bar=True)
-        self.log("val_freq_domain_loss", loss_freq, on_epoch=True, prog_bar=True)
-        self.log("val_time_domain_loss", loss_time, on_epoch=True, prog_bar=True)
-        self.log("val_psycho_acoustic_loss", loss_pa, on_epoch=True, prog_bar=True)
+        if loss_dict.get("freq_domain_loss") is not None:
+            loss_freq = loss_freq_tmp / cnt
+            self.log("val_freq_domain_loss", loss_freq, on_epoch=True, prog_bar=True)
+        if loss_dict.get("time_domain_loss") is not None:
+            loss_time = loss_time_tmp / cnt
+            self.log("val_time_domain_loss", loss_time, on_epoch=True, prog_bar=True)
+        if loss_dict.get("psycho_acoustic_loss") is not None:
+            loss_pa = loss_pa_tmp / cnt
+            self.log("val_psycho_acoustic_loss", loss_pa, on_epoch=True, prog_bar=True)
 
 
 def main(conf, args):
@@ -580,6 +590,23 @@ def main(conf, args):
     callbacks.append(checkpoint)
     callbacks.append(es)
 
+    # load the largest epoch of checkpoint
+    if os.path.exists(checkpoint_dir):
+        checkpoints = [
+            f
+            for f in os.listdir(checkpoint_dir)
+            if os.path.isfile(os.path.join(checkpoint_dir, f)) and "ckpt" in f
+        ]
+        epochs = [
+            int(re.search(r"epoch=(\d+)", f).group(1))
+            for f in checkpoints
+            if re.search(r"epoch=(\d+)", f)
+        ]
+        max_epoch_idx = epochs.index(max(epochs))
+        resume_checkpoint = os.path.join(checkpoint_dir, checkpoints[max_epoch_idx])
+    else:
+        resume_checkpoint = None
+
     trainer = pl.Trainer(
         max_epochs=args.epochs,
         callbacks=callbacks,
@@ -588,6 +615,7 @@ def main(conf, args):
         strategy="ddp",
         devices="auto",
         limit_train_batches=1.0,  # Useful for fast experiment
+        resume_from_checkpoint=resume_checkpoint,
     )
     trainer.fit(system)
 
@@ -602,6 +630,10 @@ def main(conf, args):
     to_save = system.model.serialize()
     to_save.update(train_dataset.get_infos())
     torch.save(to_save, os.path.join(exp_dir, "best_model.pth"))
+
+    # Save the model from the last epoch
+    last_epoch_model_path = os.path.join(exp_dir, "last_epoch_model.pth")
+    torch.save(system.model.state_dict(), last_epoch_model_path)
 
 
 if __name__ == "__main__":
