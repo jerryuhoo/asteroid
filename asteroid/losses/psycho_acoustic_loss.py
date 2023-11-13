@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 
 
-def psycho_acoustic_loss(ys_pred, ys_true, fs=44100, N=1024, nfilts=64, quality=100):
+def psycho_acoustic_loss(ys_pred, ys_true, fs=44100, N=1024, nfilts=64):
     """
     ys_pred: [batch_size, channels, N+1, frame]
     ys_true: [batch_size, channels, N+1, frame]
@@ -18,18 +18,11 @@ def psycho_acoustic_loss(ys_pred, ys_true, fs=44100, N=1024, nfilts=64, quality=
         )
 
     # Function to compute MSE loss for a single channel
-    def compute_channel_loss(y_pred_channel, y_true_channel, use_quantization=False):
-        mT_pred, mTbarkquant_pred = compute_masking_threshold(
-            y_pred_channel, fs, N, nfilts, quality
-        )
-        mT_true, mTbarkquant_true = compute_masking_threshold(
-            y_true_channel, fs, N, nfilts, quality
-        )
+    def compute_channel_loss(y_pred_channel, y_true_channel):
+        mT_pred = compute_masking_threshold(y_pred_channel, fs, N, nfilts)
+        mT_true = compute_masking_threshold(y_true_channel, fs, N, nfilts)
 
-        if use_quantization:
-            return F.mse_loss(mTbarkquant_pred, mTbarkquant_true)
-        else:
-            return F.mse_loss(mT_pred, mT_true)
+        return F.mse_loss(mT_pred, mT_true)
 
     if channels == 1:
         # Mono audio
@@ -39,7 +32,7 @@ def psycho_acoustic_loss(ys_pred, ys_true, fs=44100, N=1024, nfilts=64, quality=
         mse_left = compute_channel_loss(ys_pred[:, 0, :, :], ys_true[:, 0, :, :])
         mse_right = compute_channel_loss(ys_pred[:, 1, :, :], ys_true[:, 1, :, :])
         mse_loss = (mse_left + mse_right) / 2  # Average loss across channels
-    # print("psycho acoustic mse loss", mse_loss.item())
+
     return mse_loss
 
 
@@ -55,7 +48,7 @@ def get_analysis_params(fs, N, nfilts=64):
     return W, spreadingfuncmatrix, alpha
 
 
-def compute_masking_threshold(ys, fs, N, nfilts=64, quality=100):
+def compute_masking_threshold(ys, fs, N, nfilts=64):
     W, spreadingfuncmatrix, alpha = get_analysis_params(fs, N, nfilts)
     W = W.to(ys.device)
     ys = ys.squeeze(1)
@@ -65,25 +58,9 @@ def compute_masking_threshold(ys, fs, N, nfilts=64, quality=100):
     mXbark = mapping2bark(torch.abs(ys), W, 2 * N)
 
     # Compute mTbark for all frames at once
-    mTbark = maskingThresholdBark(mXbark, spreadingfuncmatrix, alpha, fs, nfilts) / (
-        quality / 100
-    )
+    mTbark = maskingThresholdBark(mXbark, spreadingfuncmatrix, alpha, fs, nfilts)
 
-    # Vectorized operations to avoid loop
-    mTbarkquant = torch.round(torch.log2(mTbark + 1e-6) * 4)
-
-    if torch.isnan(mTbarkquant).any():
-        print("NaN detected in mTbarkquant!")
-        raise ValueError
-
-    mTbarkquant = torch.clamp(mTbarkquant, min=0)
-    mTbarkdequant = torch.pow(2, mTbarkquant / 4).to(mXbark.device)
-
-    # Compute mT for all frames at once
-    W_inv = mappingfrombarkmat(W, 2 * N)
-    mT = mappingfrombark(mTbarkdequant, W_inv, 2 * N)
-
-    return mTbark, mTbarkquant
+    return mTbark
 
 
 def compute_STFT(x, N, return_amplitude=True):
@@ -114,9 +91,7 @@ def f_SP_dB(maxfreq, nfilts):
     maxbark = hz2bark(maxfreq)
     spreadingfunctionBarkdB = torch.zeros(2 * nfilts)
     spreadingfunctionBarkdB[0:nfilts] = torch.linspace(-maxbark * 27, -8, nfilts) - 23.5
-    spreadingfunctionBarkdB[nfilts : 2 * nfilts] = (
-        torch.linspace(0, -maxbark * 12.0, nfilts) - 23.5
-    )
+    spreadingfunctionBarkdB[nfilts : 2 * nfilts] = torch.linspace(0, -maxbark * 12.0, nfilts) - 23.5
     return spreadingfunctionBarkdB
 
 
@@ -124,9 +99,7 @@ def spreadingfunctionmat(spreadingfunctionBarkdB, alpha, nfilts):
     spreadingfunctionBarkVoltage = 10.0 ** (spreadingfunctionBarkdB / 20.0 * alpha)
     spreadingfuncmatrix = torch.zeros(nfilts, nfilts)
     for k in range(nfilts):
-        spreadingfuncmatrix[k, :] = spreadingfunctionBarkVoltage[
-            (nfilts - k) : (2 * nfilts - k)
-        ]
+        spreadingfuncmatrix[k, :] = spreadingfunctionBarkVoltage[(nfilts - k) : (2 * nfilts - k)]
     return spreadingfuncmatrix
 
 
@@ -211,9 +184,7 @@ def mapping2bark(mX, W, nfft):
 
 def mappingfrombarkmat(W, nfft):
     nfreqs = int(nfft / 2)
-    W_inv = torch.mm(
-        torch.diag(1.0 / (torch.sum(W, dim=1) + 1e-6)).sqrt(), W[:, 0 : nfreqs + 1]
-    ).T
+    W_inv = torch.mm(torch.diag(1.0 / (torch.sum(W, dim=1) + 1e-6)).sqrt(), W[:, 0 : nfreqs + 1]).T
     return W_inv
 
 
@@ -229,8 +200,8 @@ def mappingfrombark(mTbark, W_inv, nfft):
     return mT  # Keeping shape [batch size, N, N]
 
 
-def plot_results(ys, fs, N, nfilts=64, quality=100):
-    mT, mTbarkquant = compute_masking_threshold(ys, fs, N, nfilts, quality)
+def plot_results(ys, fs, N, nfilts=64):
+    mT = compute_masking_threshold(ys, fs, N, nfilts)
 
     # Convert STFT magnitude to dB for visualization
     ys = ys.squeeze()
@@ -265,9 +236,7 @@ def plot_results(ys, fs, N, nfilts=64, quality=100):
     plt.subplot(3, 1, 2)
     # print("ys", ys_dB[:, middle_frame_idx].numpy())
     # print("mt", mT_dB[:, middle_frame_idx].numpy())
-    plt.plot(
-        f, ys_dB[:, middle_frame_idx].numpy(), color="blue", label="Spectrum", alpha=0.7
-    )
+    plt.plot(f, ys_dB[:, middle_frame_idx].numpy(), color="blue", label="Spectrum", alpha=0.7)
     plt.plot(
         f,
         mT_dB[:, middle_frame_idx].numpy(),
