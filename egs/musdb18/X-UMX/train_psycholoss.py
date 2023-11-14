@@ -148,9 +148,7 @@ def time_domain_loss(mix, time_hat, gt_time, combination=True):
     mix_ref.extend([gt_time[..., 2 * i : 2 * i + 2, :] for i in range(n_src)])
     mix_ref = torch.stack(mix_ref)
     mix_ref = mix_ref.view(-1, time_length)
-    time_hat = time_hat.view(
-        n_batch * n_channel * time_hat.shape[0], time_hat.shape[-1]
-    )
+    time_hat = time_hat.view(n_batch * n_channel * time_hat.shape[0], time_hat.shape[-1])
 
     # If Combination is True, calculate the expected combinations.
     if combination:
@@ -181,9 +179,7 @@ def time_domain_loss(mix, time_hat, gt_time, combination=True):
     return 1.0 + _loss_sdr
 
 
-def psycho_acoustic_loss_comb(
-    s_hat, gt_spec, fs=44100, N=2048, nfilts=64, quality=100, combination=True
-):
+def psycho_acoustic_loss_comb(s_hat, gt_spec, fs=44100, N=2048, nfilts=64, combination=True):
     """
     Calculate psycho-acoustic loss between estimated and reference spectrograms.
 
@@ -217,9 +213,7 @@ def psycho_acoustic_loss_comb(
     for i in range(n_src):
         inferences_new = inferences[i].permute(1, 2, 3, 0)
         references_new = references[i].permute(1, 2, 3, 0)
-        _loss_psycho += psycho_acoustic_loss(
-            inferences_new, references_new, fs, N, nfilts, quality
-        )
+        _loss_psycho += psycho_acoustic_loss(inferences_new, references_new, fs, N, nfilts)
         cnt += 1.0
 
     # If combination is True, calculate the expected combinations
@@ -233,7 +227,7 @@ def psycho_acoustic_loss_comb(
                 combined_inference = combined_inference.permute(1, 2, 3, 0)
                 combined_reference = combined_reference.permute(1, 2, 3, 0)
                 tmp_loss = psycho_acoustic_loss(
-                    combined_inference, combined_reference, fs, N, nfilts, quality
+                    combined_inference, combined_reference, fs, N, nfilts
                 )
                 _loss_psycho += tmp_loss
                 cnt += 1.0
@@ -267,9 +261,9 @@ def weighted_sdr(input, gt, mix, weighted=True, eps=1e-10):
 
     # Noise
     num_noise = (ns * ns_hat).sum(1, keepdims=True)
-    denom_noise = torch.sqrt(
-        eps + (ns_hat * ns_hat).sum(1, keepdims=True)
-    ) * torch.sqrt(eps + (ns * ns).sum(1, keepdims=True))
+    denom_noise = torch.sqrt(eps + (ns_hat * ns_hat).sum(1, keepdims=True)) * torch.sqrt(
+        eps + (ns * ns).sum(1, keepdims=True)
+    )
     sdr_noise = num_noise / (denom_noise + eps)
 
     return torch.mean(-alpha * sdr_cln - (1.0 - alpha) * sdr_noise)
@@ -352,16 +346,13 @@ class MultiDomainLoss(_Loss):
             n_src = spec_hat.shape[0]
             mixture_t = sum([targets[:, 2 * i : 2 * i + 2, ...] for i in range(n_src)])
             loss_f = freq_domain_loss(spec_hat, Y, combination=self._combi)
-            loss_t = time_domain_loss(
-                mixture_t, time_hat, targets, combination=self._combi
-            )
+            loss_t = time_domain_loss(mixture_t, time_hat, targets, combination=self._combi)
             loss_pa = psycho_acoustic_loss_comb(
                 spec_hat,
                 Y,
                 fs=44100,
                 N=2048,
                 nfilts=64,
-                quality=100,
                 combination=self._combi,
             )
             # print("loss_pa: {}".format(loss_pa))
@@ -382,7 +373,6 @@ class MultiDomainLoss(_Loss):
                 fs=44100,
                 N=2048,
                 nfilts=64,
-                quality=100,
                 combination=self._combi,
             )
             loss_dict["total_loss"] = loss_pa
@@ -430,9 +420,7 @@ class XUMXManager(System):
     ):
         config["data"].pop("sources")
         config["data"].pop("source_augmentations")
-        super().__init__(
-            model, optimizer, loss_func, train_loader, val_loader, scheduler, config
-        )
+        super().__init__(model, optimizer, loss_func, train_loader, val_loader, scheduler, config)
         self.val_dur_samples = model.sample_rate * val_dur
 
     def validation_step(self, batch, batch_nb):
@@ -467,10 +455,7 @@ class XUMXManager(System):
 
             cnt += 1
             sp += dur_samples
-            if (
-                batch_tmp[0].shape[-1] < dur_samples
-                or batch[0].shape[-1] == cnt * dur_samples
-            ):
+            if batch_tmp[0].shape[-1] < dur_samples or batch[0].shape[-1] == cnt * dur_samples:
                 break
         loss = loss_tmp / cnt
         self.log("val_loss", loss, on_epoch=True, prog_bar=True)
@@ -497,16 +482,12 @@ def main(conf, args):
     # Load Datasets
     train_dataset, valid_dataset = dataloader.load_datasets(parser, args)
     dataloader_kwargs = (
-        {"num_workers": args.num_workers, "pin_memory": True}
-        if torch.cuda.is_available()
-        else {}
+        {"num_workers": args.num_workers, "pin_memory": True} if torch.cuda.is_available() else {}
     )
     train_sampler = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True, **dataloader_kwargs
     )
-    valid_sampler = torch.utils.data.DataLoader(
-        valid_dataset, batch_size=1, **dataloader_kwargs
-    )
+    valid_sampler = torch.utils.data.DataLoader(valid_dataset, batch_size=1, **dataloader_kwargs)
 
     # Define model and optimizer
     if args.pretrained is not None:
@@ -515,9 +496,7 @@ def main(conf, args):
     else:
         scaler_mean, scaler_std = get_statistics(args, train_dataset)
 
-    max_bin = bandwidth_to_max_bin(
-        train_dataset.sample_rate, args.in_chan, args.bandwidth
-    )
+    max_bin = bandwidth_to_max_bin(train_dataset.sample_rate, args.in_chan, args.bandwidth)
 
     x_unmix = XUMX(
         window_length=args.window_length,
@@ -555,9 +534,7 @@ def main(conf, args):
     with open(conf_path, "w") as outfile:
         yaml.safe_dump(conf, outfile)
 
-    es = EarlyStopping(
-        monitor="val_loss", mode="min", patience=args.patience, verbose=True
-    )
+    es = EarlyStopping(monitor="val_loss", mode="min", patience=args.patience, verbose=True)
 
     # Define Loss function.
     loss_func = MultiDomainLoss(
