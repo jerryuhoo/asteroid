@@ -13,6 +13,7 @@ from asteroid.complex_nn import torch_complex_from_magphase
 import os
 import warnings
 import sys
+import glob
 
 
 def load_model(model_name, device="cpu"):
@@ -144,11 +145,17 @@ def inference_args(parser, remaining_args):
     )
 
     inf_parser.add_argument(
-        "--niter", type=int, default=1, help="number of iterations for refining results."
+        "--niter",
+        type=int,
+        default=1,
+        help="number of iterations for refining results.",
     )
 
     inf_parser.add_argument(
-        "--alpha", type=float, default=1.0, help="exponent in case of softmask separation"
+        "--alpha",
+        type=float,
+        default=1.0,
+        help="exponent in case of softmask separation",
     )
 
     inf_parser.add_argument("--samplerate", type=int, default=44100, help="model samplerate")
@@ -173,7 +180,6 @@ def eval_main(
     duration=-1.0,
     no_cuda=False,
 ):
-
     model_name = os.path.abspath(model_name)
     if not (os.path.exists(model_name)):
         outdir = os.path.abspath("./results_using_pre-trained")
@@ -185,7 +191,7 @@ def eval_main(
     else:
         outdir = os.path.join(
             os.path.abspath(outdir),
-            "EvaluateResults_musdb18_testdata",
+            "EvaluateResults_musdb18_testdata_last",
         )
     Path(outdir).mkdir(exist_ok=True, parents=True)
     print("Evaluated results will be saved in:\n {}".format(outdir), file=sys.stderr)
@@ -199,6 +205,7 @@ def eval_main(
     Path(outdir).mkdir(exist_ok=True, parents=True)
     txtout = os.path.join(outdir, "results.txt")
     fp = open(txtout, "w")
+
     for track in test_dataset:
         input_file = os.path.join(root, "test", track.name, "mixture.wav")
 
@@ -245,7 +252,11 @@ def eval_main(
         print("Processing... {}".format(track.name), file=sys.stderr)
         print(track.name, file=fp)
         for target, estimate in estimates.items():
-            sf.write(str(output_path / Path(target).with_suffix(".wav")), estimate, samplerate)
+            sf.write(
+                str(output_path / Path(target).with_suffix(".wav")),
+                estimate,
+                samplerate,
+            )
         track_scores = museval.eval_mus_track(track, estimates)
         results.add_track(track_scores.df)
         print(track_scores, file=sys.stderr)
@@ -257,6 +268,18 @@ def eval_main(
     print(results, file=sys.stderr)
     print(results, file=fp)
     fp.close()
+
+
+def find_latest_pth_file(directory):
+    search_path = os.path.join(directory, "*.pth")
+
+    pth_files = glob.glob(search_path)
+
+    if not pth_files:
+        raise FileNotFoundError("No .pth files found in the specified directory.")
+
+    pth_files.sort(key=os.path.getmtime)
+    return pth_files[-1]
 
 
 if __name__ == "__main__":
@@ -282,7 +305,10 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--large", action="store_true", default=False, help="Download and use X-UMX Large (X-UMXL)"
+        "--large",
+        action="store_true",
+        default=False,
+        help="Download and use X-UMX Large (X-UMXL)",
     )
 
     parser.add_argument(
@@ -292,7 +318,11 @@ if __name__ == "__main__":
     args, _ = parser.parse_known_args()
     args = inference_args(parser, args)
 
-    model = os.path.join(args.outdir, "best_model.pth")
+    # model = os.path.join(args.outdir, "best_model.pth")
+    directory = os.path.join(args.outdir, "checkpoints/latest")
+    last_model_path = find_latest_pth_file(directory)
+    model = os.path.join(last_model_path)
+
     eval_main(
         root=args.root,
         samplerate=args.samplerate,

@@ -1,14 +1,15 @@
 import pandas as pd
 
-tag = "baseline"
-# tag = "multiloss_with_psy"
+# tag = "baseline"
+# tag = "multiloss_with_psy2"
 # tag = "single_psy"
 # tag = "multiloss_without_psy"
 # tag = "finetune"
-# tag = "multiloss_with_psy_cl"
+tag = "multiloss_with_psy_cl2"
+# tag = "multiloss_without_psy2"
 
 results_from_file = pd.read_pickle(
-    "exp/train_xumx_" + tag + "/EvaluateResults_musdb18_testdata/results.pandas"
+    "exp/train_xumx_" + tag + "/EvaluateResults_musdb18_testdata_last/results.pandas"
 )
 
 # print(results_from_file)
@@ -30,6 +31,9 @@ grouped_results_without_time = (
 
 # Combining the results with the average scores
 combined_results = pd.concat([grouped_results_without_time, avg_scores])
+
+# Filtering for only SDR values
+combined_results = combined_results[combined_results["metric"] == "SDR"]
 
 # Sorting the results for better readability and formatting the results
 combined_results.sort_values(by=["target", "metric"], inplace=True)

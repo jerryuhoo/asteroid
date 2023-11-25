@@ -34,6 +34,47 @@ from operator import itemgetter
 parser = argparse.ArgumentParser()
 
 
+class LatestModelCheckpoint(ModelCheckpoint):
+    def __init__(self, dirpath, filename="{epoch}-{step}", max_keep=5, **kwargs):
+        super().__init__(dirpath=dirpath, filename=filename, **kwargs)
+        self.max_keep = max_keep
+        self.saved = []
+        self.saved_pth = []
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        super().on_train_epoch_end(trainer, pl_module)
+        self.cleanup()
+
+    def cleanup(self):
+        while len(self.saved) > self.max_keep:
+            try:
+                os.remove(self.saved.pop(0))
+            except OSError:
+                pass
+
+    def on_save_checkpoint(self, trainer, pl_module, checkpoint):
+        metrics = {"epoch": trainer.current_epoch, "step": trainer.global_step}
+        ckpt_filepath = self.format_checkpoint_name(metrics, ver=None)
+        ckpt_filepath = os.path.join(self.dirpath, f"{ckpt_filepath}.ckpt")
+        self.saved.append(ckpt_filepath)
+
+        serialized_model = pl_module.model.serialize()
+        pth_filepath = os.path.join(
+            self.dirpath, f"epoch={trainer.current_epoch}-step={trainer.global_step}.pth"
+        )
+        torch.save(serialized_model, pth_filepath)
+        self.saved_pth.append(pth_filepath)
+
+        self.cleanup_serialized_files()
+
+    def cleanup_serialized_files(self):
+        while len(self.saved_pth) > self.max_keep:
+            try:
+                os.remove(self.saved_pth.pop(0))
+            except OSError:
+                pass
+
+
 def bandwidth_to_max_bin(rate, n_fft, bandwidth):
     freqs = np.linspace(0, float(rate) / 2, n_fft // 2 + 1, endpoint=True)
 
@@ -356,6 +397,7 @@ class MultiDomainLoss(_Loss):
                 combination=self._combi,
             )
             # print("loss_pa: {}".format(loss_pa))
+            # total_loss = float(self.coef) * loss_t + loss_f
             total_loss = float(self.coef) * loss_t + loss_f + loss_pa
 
             loss_dict["total_loss"] = total_loss
@@ -560,19 +602,22 @@ def main(conf, args):
 
     # Define callbacks
     callbacks = []
-    checkpoint_dir = os.path.join(exp_dir, "checkpoints/")
+    checkpoint_dir_best = os.path.join(exp_dir, "checkpoints/best")
+    checkpoint_dir_latest = os.path.join(exp_dir, "checkpoints/latest")
     checkpoint = ModelCheckpoint(
-        checkpoint_dir, monitor="val_loss", mode="min", save_top_k=5, verbose=True
+        checkpoint_dir_best, monitor="val_loss", mode="min", save_top_k=5, verbose=True
     )
+    checkpoint_callback_latest = LatestModelCheckpoint(dirpath=checkpoint_dir_latest, max_keep=5)
     callbacks.append(checkpoint)
     callbacks.append(es)
+    callbacks.append(checkpoint_callback_latest)
 
     # load the largest epoch of checkpoint
-    if os.path.exists(checkpoint_dir):
+    if os.path.exists(checkpoint_dir_latest):
         checkpoints = [
             f
-            for f in os.listdir(checkpoint_dir)
-            if os.path.isfile(os.path.join(checkpoint_dir, f)) and "ckpt" in f
+            for f in os.listdir(checkpoint_dir_latest)
+            if os.path.isfile(os.path.join(checkpoint_dir_latest, f)) and "ckpt" in f
         ]
         epochs = [
             int(re.search(r"epoch=(\d+)", f).group(1))
@@ -580,7 +625,7 @@ def main(conf, args):
             if re.search(r"epoch=(\d+)", f)
         ]
         max_epoch_idx = epochs.index(max(epochs))
-        resume_checkpoint = os.path.join(checkpoint_dir, checkpoints[max_epoch_idx])
+        resume_checkpoint = os.path.join(checkpoint_dir_latest, checkpoints[max_epoch_idx])
     else:
         resume_checkpoint = None
 
@@ -607,10 +652,6 @@ def main(conf, args):
     to_save = system.model.serialize()
     to_save.update(train_dataset.get_infos())
     torch.save(to_save, os.path.join(exp_dir, "best_model.pth"))
-
-    # Save the model from the last epoch
-    last_epoch_model_path = os.path.join(exp_dir, "last_epoch_model.pth")
-    torch.save(system.model.state_dict(), last_epoch_model_path)
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ python_path=python
 # ./run.sh --stage 1 --tag my_tag --mix_coef 10.0
 
 # General
-stage=0  # Controls from which stage to start
+stage=1  # Controls from which stage to start
 tag=  # Controls the directory name associated to the experiment
 # You can ask for several GPUs using id (passed to CUDA_VISIBLE_DEVICES)
 id=$CUDA_VISIBLE_DEVICES
@@ -43,7 +43,7 @@ mix_coef=10.0
 val_dur=80.0
 
 # Evaluation
-eval_use_gpu=-1
+eval_use_gpu=1
 
 . utils/parse_options.sh
 
@@ -68,7 +68,7 @@ echo "Results from the following experiment will be stored in $expdir"
 if [[ $stage -le 1 ]]; then
   echo "Stage 1: Training"
   mkdir -p logs
-  CUDA_VISIBLE_DEVICES=$id $python_path train.py \
+  CUDA_VISIBLE_DEVICES=$id $python_path train_psycholoss.py \
   --train_dir $musdb18_dir \
   --sample_rate $sample_rate \
   --seed $seed \
@@ -95,10 +95,12 @@ if [[ $stage -le 2 ]]; then
     $python_path eval.py \
     --no-cuda \
     --root $musdb18_dir \
+    --duration $val_dur \
     --outdir ${expdir} | tee logs/eval_${tag}.log
   else
     CUDA_VISIBLE_DEVICES=$id $python_path eval.py \
     --root $musdb18_dir \
+    --duration $val_dur \
     --outdir ${expdir} | tee logs/eval_${tag}.log
   fi
   cp logs/eval_${tag}.log $expdir/eval.log
